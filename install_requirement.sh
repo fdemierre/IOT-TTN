@@ -42,5 +42,9 @@ sudo apt install -y grafana
 sudo systemctl enable grafana-server
 sudo systemctl start grafana-server
 
+### --- Python pour MQTT -> MongoDB ---
+echo "🐍 Installation des outils Python..."
+sudo apt install -y python3.12-venv python3-full python3-pip
+
 echo ""
 echo "✅ Installation terminée avec succès ! Tous les services tournent en local."
