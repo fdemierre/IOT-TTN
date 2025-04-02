@@ -1,47 +1,46 @@
-#!/bin/bash
+import paho.mqtt.client as mqtt
+from pymongo import MongoClient
+import datetime
 
-set -e
+# === Configuration MQTT ===
+MQTT_BROKER = "localhost"
+MQTT_PORT = 1883
+MQTT_TOPIC = "#"
 
-echo "🔧 Configuration sécurisée de Mosquitto (Bridge vers TTN ou autre serveur MQTT)"
+# === Configuration MongoDB ===
+MONGO_URI = "mongodb://localhost:27017"
+MONGO_DB = "mqtt_data"
+MONGO_COLLECTION = "messages"
 
-# Valeurs par défaut
-DEFAULT_HOST="eu1.cloud.thethings.network"
-DEFAULT_PORT="8883"
+# Connexion à MongoDB
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client[MONGO_DB]
+collection = db[MONGO_COLLECTION]
 
-# Demande interactive
-read -p "👉 MQTT server host [$DEFAULT_HOST]: " MQTT_HOST
-MQTT_HOST=${MQTT_HOST:-$DEFAULT_HOST}
+# Callback lors de la connexion MQTT
+def on_connect(client, userdata, flags, rc):
+    print("✅ Connecté à Mosquitto avec le code de retour", rc)
+    client.subscribe(MQTT_TOPIC)
+    print(f"📡 Abonné au topic : {MQTT_TOPIC}")
 
-read -p "👉 MQTT username (ex: app1@tenant1): " MQTT_USER
-read -s -p "👉 MQTT password (sera masqué): " MQTT_PASS
-echo ""
+# Callback à chaque message MQTT reçu
+def on_message(client, userdata, msg):
+    try:
+        payload = msg.payload.decode("utf-8")
+        print(f"[{msg.topic}] {payload}")
+        collection.insert_one({
+            "topic": msg.topic,
+            "payload": payload,
+            "timestamp": datetime.datetime.utcnow()
+        })
+        print("✅ Message enregistré dans MongoDB")
+    except Exception as e:
+        print(f"❌ Erreur MongoDB : {e}")
 
-# Création du dossier s'il n'existe pas
-sudo mkdir -p /etc/mosquitto/conf.d
+# Initialisation du client MQTT
+mqtt_client = mqtt.Client()
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
 
-# Écriture de la config bridge
-CONFIG_FILE="/etc/mosquitto/conf.d/secure.conf"
-echo "📄 Écriture de la configuration dans $CONFIG_FILE"
-
-sudo tee "$CONFIG_FILE" > /dev/null <<EOF
-# Bridge vers un serveur MQTT distant
-connection bridge-to-cloud
-address $MQTT_HOST:$DEFAULT_PORT
-topic # both 0
-remote_username $MQTT_USER
-remote_password $MQTT_PASS
-start_type automatic
-try_private false
-notifications false
-cleansession true
-
-# Désactivation des connexions anonymes locales
-allow_anonymous false
-EOF
-
-# Redémarrage du service
-echo "🔁 Redémarrage de Mosquitto..."
-sudo systemctl restart mosquitto
-
-echo ""
-echo "✅ Configuration terminée ! Mosquitto est maintenant connecté à $MQTT_HOST"
+mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+mqtt_client.loop_forever()
