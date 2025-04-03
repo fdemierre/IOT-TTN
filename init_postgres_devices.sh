@@ -4,11 +4,10 @@ set -e
 
 echo "🛠️  Initialisation complète de PostgreSQL avec utilisateur 'iot' et bases 'devices' + 'data'"
 
-# === Étape 1 : Demander le mot de passe admin PostgreSQL ===
+# === Étape 1 : Définir le mot de passe du superutilisateur postgres ===
 read -s -p "🔑 Entrez un mot de passe à définir pour l'utilisateur PostgreSQL 'postgres' : " POSTGRES_PASSWORD
 echo ""
 
-# === Mise à jour mot de passe postgres ===
 echo "🔐 Mise à jour du mot de passe de 'postgres'..."
 sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$POSTGRES_PASSWORD';"
 
@@ -16,7 +15,7 @@ sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$POSTGRES_PASSWORD'
 IOT_USER="iot"
 IOT_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
 
-# === Étape 3 : Créer ou mettre à jour le compte 'iot' ===
+# === Étape 3 : Créer ou mettre à jour l'utilisateur 'iot' ===
 echo "👤 Création/Mise à jour de l'utilisateur PostgreSQL '$IOT_USER'..."
 sudo -u postgres psql <<EOF
 DO
@@ -49,19 +48,18 @@ CREATE TABLE IF NOT EXISTS mapping_decoder (
     decoder TEXT NOT NULL
 );"
 
-# === Étape 6 : Donner les droits à iot ===
+# === Étape 6 : Droits sur la table ===
 sudo -u postgres psql -d devices -c "GRANT ALL PRIVILEGES ON TABLE mapping_decoder TO $IOT_USER;"
 
-# === Étape 7 : Enregistrer le mot de passe localement ===
-PGPASS_FILE="$HOME/IOT-TTN/iot-site/pgpass.json"
-mkdir -p "$(dirname "$PGPASS_FILE")"
-echo "{\"iot_password\": \"$IOT_PASSWORD\"}" > "$PGPASS_FILE"
+# === Étape 7 : Sauvegarde du mot de passe dans pass.txt ===
+mkdir -p "$HOME/IOT-TTN"
+echo "$IOT_PASSWORD" > "$HOME/IOT-TTN/pass.txt"
 
 # === Affichage final ===
 echo ""
 echo "✅ PostgreSQL initialisé avec succès !"
 echo "👤 Utilisateur      : $IOT_USER"
 echo "🔐 Mot de passe     : $IOT_PASSWORD"
-echo "📁 Sauvegardé dans  : $PGPASS_FILE"
+echo "📝 Sauvegardé dans  : ~/IOT-TTN/pass.txt"
 echo "🗃️  Bases créées    : devices, data"
-echo "📄 Table            : mapping_decoder (droits complets accordés à $IOT_USER)"
+echo "📄 Table            : mapping_decoder (droits accordés)"
