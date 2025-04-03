@@ -4,7 +4,7 @@ set -e
 
 echo "🛠️  Initialisation complète de PostgreSQL avec utilisateur 'iot' et bases 'devices' + 'data'"
 
-# === Étape 1 : Définir le mot de passe du superutilisateur postgres ===
+# === Étape 1 : Mot de passe superutilisateur postgres ===
 read -s -p "🔑 Entrez un mot de passe à définir pour l'utilisateur PostgreSQL 'postgres' : " POSTGRES_PASSWORD
 echo ""
 
@@ -32,14 +32,14 @@ END
 \$do\$;
 EOF
 
-# === Étape 4 : Créer les bases devices et data ===
+# === Étape 4 : Créer les bases 'devices' et 'data' ===
 for DB in devices data; do
     echo "🗃️  Création de la base '$DB'..."
     sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$DB'" | grep -q 1 || \
     sudo -u postgres createdb -O "$IOT_USER" "$DB"
 done
 
-# === Étape 5 : Créer la table mapping_decoder dans 'devices' ===
+# === Étape 5 : Créer la table mapping_decoder ===
 echo "📐 Création de la table 'mapping_decoder' dans 'devices'..."
 sudo -u postgres psql -d devices -c "
 CREATE TABLE IF NOT EXISTS mapping_decoder (
@@ -51,15 +51,21 @@ CREATE TABLE IF NOT EXISTS mapping_decoder (
 # === Étape 6 : Droits sur la table ===
 sudo -u postgres psql -d devices -c "GRANT ALL PRIVILEGES ON TABLE mapping_decoder TO $IOT_USER;"
 
-# === Étape 7 : Sauvegarde du mot de passe dans pass.txt ===
-mkdir -p "$HOME/IOT-TTN"
+# === Étape 7 : Sauvegarder le mot de passe ===
+mkdir -p "$HOME/IOT-TTN/iot-site"
+
+# JSON
+echo "{\"iot_password\": \"$IOT_PASSWORD\"}" > "$HOME/IOT-TTN/iot-site/pgpass.json"
+
+# Texte brut
 echo "$IOT_PASSWORD" > "$HOME/IOT-TTN/pass.txt"
 
-# === Affichage final ===
+# === Résultat ===
 echo ""
 echo "✅ PostgreSQL initialisé avec succès !"
 echo "👤 Utilisateur      : $IOT_USER"
 echo "🔐 Mot de passe     : $IOT_PASSWORD"
-echo "📝 Sauvegardé dans  : ~/IOT-TTN/pass.txt"
+echo "📁 JSON sauvegardé  : ~/IOT-TTN/iot-site/pgpass.json"
+echo "📄 Mot de passe brut : ~/IOT-TTN/pass.txt"
 echo "🗃️  Bases créées    : devices, data"
-echo "📄 Table            : mapping_decoder (droits accordés)"
+echo "📄 Table            : mapping_decoder (avec droits)"
