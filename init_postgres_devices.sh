@@ -25,6 +25,8 @@ BEGIN
       SELECT FROM pg_catalog.pg_roles WHERE rolname = '$IOT_USER'
    ) THEN
       CREATE ROLE $IOT_USER LOGIN PASSWORD '$IOT_PASSWORD';
+   ELSE
+      ALTER ROLE $IOT_USER WITH PASSWORD '$IOT_PASSWORD';
    END IF;
 END
 \$do\$;
@@ -46,14 +48,19 @@ CREATE TABLE IF NOT EXISTS mapping_decoder (
     decoder TEXT NOT NULL
 );"
 
-# === Étape 6 : Donner les droits sur la table à l'utilisateur 'iot' ===
+# === Étape 6 : GRANT pour iot sur la table ===
 sudo -u postgres psql -d devices -c "GRANT ALL PRIVILEGES ON TABLE mapping_decoder TO $IOT_USER;"
+
+# === Étape 7 : Sauvegarder le mot de passe dans pgpass.json ===
+PGPASS_FILE="$HOME/IOT-TTN/iot-site/pgpass.json"
+mkdir -p "$(dirname "$PGPASS_FILE")"
+echo "{\"iot_password\": \"$IOT_PASSWORD\"}" > "$PGPASS_FILE"
 
 # === Résultat ===
 echo ""
 echo "✅ PostgreSQL initialisé avec succès !"
-echo "👤 Utilisateur : $IOT_USER"
-echo "🔐 Mot de passe généré : $IOT_PASSWORD"
-echo "🗃️  Bases créées : devices, data"
-echo "📄 Table créée dans 'devices' : mapping_decoder"
-echo "🔑 Droits complets accordés à '$IOT_USER' sur mapping_decoder"
+echo "👤 Utilisateur      : $IOT_USER"
+echo "🔐 Mot de passe     : $IOT_PASSWORD"
+echo "📁 Sauvegardé dans  : $PGPASS_FILE"
+echo "🗃️  Bases créées    : devices, data"
+echo "📄 Table créée      : mapping_decoder (droits complets accordés à $IOT_USER)"
