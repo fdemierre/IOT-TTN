@@ -39,25 +39,13 @@ for DB in devices data; do
     sudo -u postgres createdb -O "$IOT_USER" "$DB"
 done
 
-# === Étape 5 : Créer la table mapping_decoder ===
-echo "📐 Création de la table 'mapping_decoder' dans 'devices'..."
-sudo -u postgres psql -d devices -c "
-CREATE TABLE IF NOT EXISTS mapping_decoder (
-    dev_eui TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    decoder TEXT NOT NULL
-);"
-
-# === Étape 6 : Droits sur la table ===
-sudo -u postgres psql -d devices -c "GRANT ALL PRIVILEGES ON TABLE mapping_decoder TO $IOT_USER;"
-
 # === Étape 7 : Sauvegarder le mot de passe ===
 mkdir -p "$HOME/IOT-TTN/iot-site"
 
-# JSON
+# Sauvegarde en JSON
 echo "{\"iot_password\": \"$IOT_PASSWORD\"}" > "$HOME/IOT-TTN/iot-site/pgpass.json"
 
-# Texte brut
+# Sauvegarde en texte brut
 echo "$IOT_PASSWORD" > "$HOME/IOT-TTN/pass.txt"
 
 # === Résultat ===
@@ -68,4 +56,3 @@ echo "🔐 Mot de passe     : $IOT_PASSWORD"
 echo "📁 JSON sauvegardé  : ~/IOT-TTN/iot-site/pgpass.json"
 echo "📄 Mot de passe brut : ~/IOT-TTN/pass.txt"
 echo "🗃️  Bases créées    : devices, data"
-echo "📄 Table            : mapping_decoder (avec droits)"
