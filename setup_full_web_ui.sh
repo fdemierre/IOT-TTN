@@ -7,9 +7,9 @@ import psycopg2
 from psycopg2 import sql
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key"  # Changez cette valeur en production
+app.secret_key = "super-secret-key"  # À modifier en production
 
-# Chemin vers le fichier de mot de passe
+# Chemin vers le fichier contenant le mot de passe PostgreSQL
 PASSWORD_FILE = os.path.join(os.environ["HOME"], "IOT-TTN", "iot-site", "pgpass.json")
 
 def get_pg_password():
@@ -18,7 +18,7 @@ def get_pg_password():
             data = json.load(f)
             return data.get("iot_password")
     except Exception as e:
-        app.logger.error(f"Erreur de lecture du fichier de mot de passe : {e}")
+        app.logger.error("Erreur de lecture du fichier de mot de passe: %s", e)
         return None
 
 def get_db_connection(dbname="devices"):
@@ -27,17 +27,16 @@ def get_db_connection(dbname="devices"):
         raise Exception("Mot de passe PostgreSQL introuvable.")
     return psycopg2.connect(dbname=dbname, user="iot", password=password, host="localhost")
 
-# Fonctions de validation
+# Validation : nom du capteur et format de dev_eui
 def validate_sensor_name(name):
-    # Autorise uniquement lettres, chiffres et underscore (pas d'espaces ni caractères spéciaux)
+    # Seuls les caractères alphanumériques et underscore sont autorisés
     return re.fullmatch(r"[A-Za-z0-9_]+", name) is not None
 
 def validate_dev_eui(dev_eui):
-    # Vérifie que le dev_eui est composé de 16 caractères hexadécimaux
+    # Le dev_eui doit comporter exactement 16 caractères hexadécimaux
     return re.fullmatch(r"[A-Fa-f0-9]{16}", dev_eui) is not None
 
 def list_sensor_tables():
-    """Liste les tables (décodeurs) présentes dans le schéma public de la base devices."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -45,10 +44,10 @@ def list_sensor_tables():
         tables = cur.fetchall()
         cur.close()
         conn.close()
-        # Filtre les noms correspondant à un nom de capteur valide
+        # On ne retient que les tables dont le nom est un nom de capteur valide
         return [t[0] for t in tables if validate_sensor_name(t[0])]
     except Exception as e:
-        app.logger.error(f"Erreur lors de la récupération des tables : {e}")
+        app.logger.error("Erreur lors de la récupération des tables: %s", e)
         return []
 
 @app.route("/decoder", methods=["GET", "POST"])
@@ -57,35 +56,21 @@ def decoder():
         action = request.form.get("action")
         if action == "create":
             sensor_name = request.form.get("sensor_name", "").strip()
-            dev_eui = request.form.get("dev_eui", "").strip()
-
             if not sensor_name:
                 flash("❌ Le nom du capteur est requis.")
             elif not validate_sensor_name(sensor_name):
-                flash("❌ Nom de capteur invalide. Utilisez uniquement des lettres, chiffres et underscore.")
-            elif not dev_eui:
-                flash("❌ Le dev_eui est requis.")
-            elif not validate_dev_eui(dev_eui):
-                flash("❌ dev_eui invalide. Format requis : 16 caractères hexadécimaux.")
+                flash("❌ Nom de capteur invalide. Utilisez uniquement lettres, chiffres et underscore.")
             else:
                 try:
                     conn = get_db_connection()
                     cur = conn.cursor()
-                    # Création de la table pour le nouveau décodeur
+                    # Création de la table avec un champ dev_eui (unique)
                     create_table_query = sql.SQL(
-                        "CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, dev_eui VARCHAR(16) NOT NULL UNIQUE)"
+                        "CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, dev_eui VARCHAR(16) UNIQUE)"
                     ).format(table=sql.Identifier(sensor_name))
                     cur.execute(create_table_query)
-                    # Insertion de l'enregistrement initial
-                    insert_query = sql.SQL(
-                        "INSERT INTO {table} (dev_eui) VALUES (%s)"
-                    ).format(table=sql.Identifier(sensor_name))
-                    cur.execute(insert_query, (dev_eui,))
                     conn.commit()
                     flash("✅ Décodeur créé avec succès.")
-                except psycopg2.errors.UniqueViolation:
-                    conn.rollback()
-                    flash("❌ Ce dev_eui existe déjà dans ce décodeur.")
                 except Exception as e:
                     conn.rollback()
                     flash(f"❌ Erreur lors de la création du décodeur : {e}")
@@ -112,7 +97,7 @@ def decoder():
                     conn.close()
         return redirect(url_for("decoder"))
     
-    # Méthode GET : récupération et affichage des décodeurs existants et de leurs dev_eui
+    # Récupération des décodeurs et de leurs enregistrements
     sensors = list_sensor_tables()
     sensors_data = []
     try:
@@ -134,12 +119,10 @@ def sensor():
     sensors = list_sensor_tables()
     selected_sensor = request.args.get("sensor")
     dev_euis = []
-
     if request.method == "POST":
         action = request.form.get("action")
         selected_sensor = request.form.get("sensor")
         dev_eui = request.form.get("dev_eui", "").strip()
-
         if not selected_sensor or not validate_sensor_name(selected_sensor):
             flash("❌ Capteur invalide sélectionné.")
         else:
@@ -170,7 +153,7 @@ def sensor():
                 flash(f"❌ Erreur lors de l'opération sur le capteur : {e}")
         return redirect(url_for("sensor", sensor=selected_sensor))
     
-    # GET : Si un capteur est sélectionné, on récupère ses dev_eui enregistrés
+    # Pour un GET, si un capteur est sélectionné, récupérer ses dev_eui
     if selected_sensor and validate_sensor_name(selected_sensor):
         try:
             conn = get_db_connection()
