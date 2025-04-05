@@ -1,3 +1,32 @@
+#!/bin/bash
+set -e
+
+echo "Installation de l’interface web UI..."
+
+# === Variables et répertoires ===
+WORKDIR="$HOME/IOT-TTN"
+APPDIR="$WORKDIR/iot-site"
+VENV="$WORKDIR/venv"
+
+# Création des dossiers nécessaires
+mkdir -p "$APPDIR/templates"
+cd "$WORKDIR"
+
+# === Création de l'environnement virtuel ===
+if [ ! -d "$VENV" ]; then
+    echo "Création de l’environnement virtuel..."
+    python3 -m venv "$VENV"
+fi
+
+# Activation de l'environnement virtuel
+source "$VENV/bin/activate"
+
+echo "Installation des dépendances..."
+pip install --upgrade pip
+pip install flask psycopg2-binary requests
+
+# === Création du fichier app.py ===
+cat > "$APPDIR/app.py" <<'EOF'
 #!/usr/bin/env python3
 import os
 import json
@@ -7,7 +36,7 @@ import psycopg2
 from psycopg2 import sql
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key"  # À modifier en production
+app.secret_key = "super-secret-key"  # À modifier pour la production
 
 # Chemin vers le fichier contenant le mot de passe PostgreSQL
 PASSWORD_FILE = os.path.join(os.environ["HOME"], "IOT-TTN", "iot-site", "pgpass.json")
@@ -27,13 +56,12 @@ def get_db_connection(dbname="devices"):
         raise Exception("Mot de passe PostgreSQL introuvable.")
     return psycopg2.connect(dbname=dbname, user="iot", password=password, host="localhost")
 
-# Validation : nom du capteur et format de dev_eui
+# Validation du nom du capteur (uniquement lettres, chiffres, underscore)
 def validate_sensor_name(name):
-    # Seuls les caractères alphanumériques et underscore sont autorisés
     return re.fullmatch(r"[A-Za-z0-9_]+", name) is not None
 
+# Validation du format dev_eui (16 caractères hexadécimaux)
 def validate_dev_eui(dev_eui):
-    # Le dev_eui doit comporter exactement 16 caractères hexadécimaux
     return re.fullmatch(r"[A-Fa-f0-9]{16}", dev_eui) is not None
 
 def list_sensor_tables():
@@ -44,12 +72,12 @@ def list_sensor_tables():
         tables = cur.fetchall()
         cur.close()
         conn.close()
-        # On ne retient que les tables dont le nom est un nom de capteur valide
         return [t[0] for t in tables if validate_sensor_name(t[0])]
     except Exception as e:
         app.logger.error("Erreur lors de la récupération des tables: %s", e)
         return []
 
+# Route /decoder : créer un décodeur (table) et lister ses enregistrements
 @app.route("/decoder", methods=["GET", "POST"])
 def decoder():
     if request.method == "POST":
@@ -64,7 +92,6 @@ def decoder():
                 try:
                     conn = get_db_connection()
                     cur = conn.cursor()
-                    # Création de la table avec un champ dev_eui (unique)
                     create_table_query = sql.SQL(
                         "CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, dev_eui VARCHAR(16) UNIQUE)"
                     ).format(table=sql.Identifier(sensor_name))
@@ -97,7 +124,6 @@ def decoder():
                     conn.close()
         return redirect(url_for("decoder"))
     
-    # Récupération des décodeurs et de leurs enregistrements
     sensors = list_sensor_tables()
     sensors_data = []
     try:
@@ -114,6 +140,7 @@ def decoder():
         flash(f"❌ Erreur lors de la récupération des décodeurs : {e}")
     return render_template("decoder.html", sensors_data=sensors_data)
 
+# Route /sensor : sélection d'un décodeur pour ajouter ou supprimer un dev_eui
 @app.route("/sensor", methods=["GET", "POST"])
 def sensor():
     sensors = list_sensor_tables()
@@ -153,7 +180,6 @@ def sensor():
                 flash(f"❌ Erreur lors de l'opération sur le capteur : {e}")
         return redirect(url_for("sensor", sensor=selected_sensor))
     
-    # Pour un GET, si un capteur est sélectionné, récupérer ses dev_eui
     if selected_sensor and validate_sensor_name(selected_sensor):
         try:
             conn = get_db_connection()
@@ -169,3 +195,133 @@ def sensor():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+EOF
+
+chmod +x "$APPDIR/app.py"
+
+# === Création des templates HTML ===
+
+# Template pour /decoder
+cat > "$APPDIR/templates/decoder.html" <<'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gestion des Décodeurs</title>
+</head>
+<body>
+  <h1>Gestion des Décodeurs</h1>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+  <h2>Créer un nouveau décodeur</h2>
+  <form method="POST">
+    <label>Nom du capteur (lettres, chiffres, underscore) :</label>
+    <input type="text" name="sensor_name" required>
+    <button type="submit" name="action" value="create">Créer</button>
+  </form>
+  <h2>Décodeurs existants</h2>
+  <ul>
+    {% for sensor in sensors_data %}
+      <li>
+        <strong>{{ sensor.sensor }}</strong> - dev_euis : {{ sensor.dev_euis }}
+        <form method="POST" style="display:inline">
+          <button type="submit" name="action" value="delete:{{ sensor.sensor }}" onclick="return confirm('Supprimer {{ sensor.sensor }} ?')">Supprimer</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+  <a href="{{ url_for('sensor') }}">Accéder à la gestion des sensors</a>
+</body>
+</html>
+EOF
+
+# Template pour /sensor
+cat > "$APPDIR/templates/sensor.html" <<'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gestion des Sensors</title>
+</head>
+<body>
+  <h1>Gestion des Sensors</h1>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <ul>
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+  <h2>Sélectionner un capteur</h2>
+  <form method="GET">
+    <select name="sensor" onchange="this.form.submit()">
+      <option value="">-- Choisir --</option>
+      {% for sensor in sensors %}
+        <option value="{{ sensor }}" {% if sensor == selected_sensor %}selected{% endif %}>{{ sensor }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% if selected_sensor %}
+    <h3>Capteur : {{ selected_sensor }}</h3>
+    <h4>Ajouter un dev_eui</h4>
+    <form method="POST">
+      <input type="hidden" name="sensor" value="{{ selected_sensor }}">
+      <label>dev_eui (16 caractères HEX) :</label>
+      <input type="text" name="dev_eui" maxlength="16" required>
+      <button type="submit" name="action" value="add">Ajouter</button>
+    </form>
+    <h4>Liste des dev_eui enregistrés</h4>
+    <ul>
+      {% for dev in dev_euis %}
+        <li>
+          {{ dev }}
+          <form method="POST" style="display:inline">
+            <input type="hidden" name="sensor" value="{{ selected_sensor }}">
+            <input type="hidden" name="dev_eui" value="{{ dev }}">
+            <button type="submit" name="action" value="delete" onclick="return confirm('Supprimer ce dev_eui ?')">Supprimer</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <a href="{{ url_for('decoder') }}">Retour à la gestion des décodeurs</a>
+</body>
+</html>
+EOF
+
+# === Création du service systemd ===
+SERVICE_FILE="/etc/systemd/system/iot-web.service"
+echo "Création du service systemd iot-web..."
+sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=IoT Device Manager Web UI
+After=network.target postgresql.service
+
+[Service]
+User=$USER
+WorkingDirectory=$APPDIR
+ExecStart=$VENV/bin/python3 $APPDIR/app.py
+Restart=always
+Environment=FLASK_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable iot-web
+sudo systemctl restart iot-web
+
+echo ""
+echo "Interface Web installée avec succès !"
+echo "Accès via : http://localhost:5000"
+echo "Pour vérifier le service : sudo systemctl status iot-web"
