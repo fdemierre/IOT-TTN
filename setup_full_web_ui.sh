@@ -77,7 +77,7 @@ def list_sensor_tables():
         app.logger.error("Erreur lors de la récupération des tables: %s", e)
         return []
 
-# Route /decoder : créer un décodeur (table) et lister ses enregistrements
+# Route /decoder : Crée un décodeur (table) avec un champ dev_eui et name, et liste ses enregistrements.
 @app.route("/decoder", methods=["GET", "POST"])
 def decoder():
     if request.method == "POST":
@@ -92,8 +92,9 @@ def decoder():
                 try:
                     conn = get_db_connection()
                     cur = conn.cursor()
+                    # Création de la table avec les colonnes dev_eui et name
                     create_table_query = sql.SQL(
-                        "CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, dev_eui VARCHAR(16) UNIQUE)"
+                        "CREATE TABLE IF NOT EXISTS {table} (id SERIAL PRIMARY KEY, dev_eui VARCHAR(16) UNIQUE, name TEXT)"
                     ).format(table=sql.Identifier(sensor_name))
                     cur.execute(create_table_query)
                     conn.commit()
@@ -130,26 +131,27 @@ def decoder():
         conn = get_db_connection()
         cur = conn.cursor()
         for sensor in sensors:
-            query = sql.SQL("SELECT dev_eui FROM {table}").format(table=sql.Identifier(sensor))
+            query = sql.SQL("SELECT dev_eui, name FROM {table}").format(table=sql.Identifier(sensor))
             cur.execute(query)
-            dev_euis = [row[0] for row in cur.fetchall()]
-            sensors_data.append({"sensor": sensor, "dev_euis": dev_euis})
+            records = cur.fetchall()
+            sensors_data.append({"sensor": sensor, "records": records})
         cur.close()
         conn.close()
     except Exception as e:
         flash(f"❌ Erreur lors de la récupération des décodeurs : {e}")
     return render_template("decoder.html", sensors_data=sensors_data)
 
-# Route /sensor : sélection d'un décodeur pour ajouter ou supprimer un dev_eui
+# Route /sensor : Permet d'ajouter ou de supprimer un enregistrement dans une table de décodeur.
 @app.route("/sensor", methods=["GET", "POST"])
 def sensor():
     sensors = list_sensor_tables()
     selected_sensor = request.args.get("sensor")
-    dev_euis = []
+    records = []
     if request.method == "POST":
         action = request.form.get("action")
         selected_sensor = request.form.get("sensor")
         dev_eui = request.form.get("dev_eui", "").strip()
+        record_name = request.form.get("name", "").strip()  # nouveau champ "name"
         if not selected_sensor or not validate_sensor_name(selected_sensor):
             flash("❌ Capteur invalide sélectionné.")
         else:
@@ -161,11 +163,13 @@ def sensor():
                         flash("❌ Le dev_eui est requis pour l'ajout.")
                     elif not validate_dev_eui(dev_eui):
                         flash("❌ dev_eui invalide. Format requis : 16 caractères hexadécimaux.")
+                    elif not record_name:
+                        flash("❌ Le nom est requis pour l'ajout.")
                     else:
-                        insert_query = sql.SQL("INSERT INTO {table} (dev_eui) VALUES (%s)").format(table=sql.Identifier(selected_sensor))
-                        cur.execute(insert_query, (dev_eui,))
+                        insert_query = sql.SQL("INSERT INTO {table} (dev_eui, name) VALUES (%s, %s)").format(table=sql.Identifier(selected_sensor))
+                        cur.execute(insert_query, (dev_eui, record_name))
                         conn.commit()
-                        flash("✅ dev_eui ajouté avec succès.")
+                        flash("✅ Enregistrement ajouté avec succès.")
                 elif action == "delete":
                     if not dev_eui:
                         flash("❌ Le dev_eui est requis pour la suppression.")
@@ -173,7 +177,7 @@ def sensor():
                         delete_query = sql.SQL("DELETE FROM {table} WHERE dev_eui = %s").format(table=sql.Identifier(selected_sensor))
                         cur.execute(delete_query, (dev_eui,))
                         conn.commit()
-                        flash("🗑️ dev_eui supprimé avec succès.")
+                        flash("🗑️ Enregistrement supprimé avec succès.")
                 cur.close()
                 conn.close()
             except Exception as e:
@@ -184,14 +188,14 @@ def sensor():
         try:
             conn = get_db_connection()
             cur = conn.cursor()
-            query = sql.SQL("SELECT dev_eui FROM {table}").format(table=sql.Identifier(selected_sensor))
+            query = sql.SQL("SELECT dev_eui, name FROM {table}").format(table=sql.Identifier(selected_sensor))
             cur.execute(query)
-            dev_euis = [row[0] for row in cur.fetchall()]
+            records = cur.fetchall()
             cur.close()
             conn.close()
         except Exception as e:
             flash(f"❌ Erreur lors de la récupération des données du capteur : {e}")
-    return render_template("sensor.html", sensors=sensors, selected_sensor=selected_sensor, dev_euis=dev_euis)
+    return render_template("sensor.html", sensors=sensors, selected_sensor=selected_sensor, records=records)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
@@ -230,7 +234,12 @@ cat > "$APPDIR/templates/decoder.html" <<'EOF'
   <ul>
     {% for sensor in sensors_data %}
       <li>
-        <strong>{{ sensor.sensor }}</strong> - dev_euis : {{ sensor.dev_euis }}
+        <strong>{{ sensor.sensor }}</strong>
+        <ul>
+          {% for rec in sensor.records %}
+            <li>dev_eui: {{ rec[0] }}, name: {{ rec[1] }}</li>
+          {% endfor %}
+        </ul>
         <form method="POST" style="display:inline">
           <button type="submit" name="action" value="delete:{{ sensor.sensor }}" onclick="return confirm('Supprimer {{ sensor.sensor }} ?')">Supprimer</button>
         </form>
@@ -272,22 +281,24 @@ cat > "$APPDIR/templates/sensor.html" <<'EOF'
   </form>
   {% if selected_sensor %}
     <h3>Capteur : {{ selected_sensor }}</h3>
-    <h4>Ajouter un dev_eui</h4>
+    <h4>Ajouter un enregistrement</h4>
     <form method="POST">
       <input type="hidden" name="sensor" value="{{ selected_sensor }}">
       <label>dev_eui (16 caractères HEX) :</label>
       <input type="text" name="dev_eui" maxlength="16" required>
+      <label>Nom :</label>
+      <input type="text" name="name" required>
       <button type="submit" name="action" value="add">Ajouter</button>
     </form>
-    <h4>Liste des dev_eui enregistrés</h4>
+    <h4>Liste des enregistrements</h4>
     <ul>
-      {% for dev in dev_euis %}
+      {% for rec in records %}
         <li>
-          {{ dev }}
+          dev_eui: {{ rec[0] }}, name: {{ rec[1] }}
           <form method="POST" style="display:inline">
             <input type="hidden" name="sensor" value="{{ selected_sensor }}">
-            <input type="hidden" name="dev_eui" value="{{ dev }}">
-            <button type="submit" name="action" value="delete" onclick="return confirm('Supprimer ce dev_eui ?')">Supprimer</button>
+            <input type="hidden" name="dev_eui" value="{{ rec[0] }}">
+            <button type="submit" name="action" value="delete" onclick="return confirm('Supprimer cet enregistrement ?')">Supprimer</button>
           </form>
         </li>
       {% endfor %}
